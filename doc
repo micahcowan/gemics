@@ -2,9 +2,11 @@
 
 import sys, os
 import posixpath
+import re
 from traceback import print_exception
 
 DOCROOT = "/var/gemini/shizdoc"
+LOCALREPO = "/home/gmcapsule/shizdoc.git"
 
 def main():
     ident = None
@@ -56,8 +58,41 @@ def handle_titan():
         eol = line.endswith("\n")
     if not eol:
         file.write('\n')
+    file.close()
 
-    gemini_redirect()
+    #redir = gemini_redirect()
+    #print("30 " + redir)
+
+    # Display the results of committing the new file
+    print("20 text/gemini\r")
+
+    print(f"# {os.environ['PATH_INFO']}")
+    print()
+    redir = gemini_redirect()
+    print(f"=> {redir}")
+    print()
+
+    print("# Git add")
+    st = os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} add {}".format(
+        shquot(LOCALREPO),
+        shquot(DOCROOT),
+        shquot(get_doc_path())
+    ))
+    print(f"Exit: {st}")
+    print()
+
+    print("# Git commit")
+    os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} commit -m {}".format(
+        shquot(LOCALREPO),
+        shquot(DOCROOT),
+        shquot(os.environ['PATH_INFO'])
+    ))
+    print(f"Exit: {st}")
+
+def shquot(msg):
+    val = re.sub("'", """'"'"'""", msg)
+    val = f"'{val}'"
+    return val
 
 def handle_gemini():
     path = get_doc_path()
@@ -119,7 +154,7 @@ def gemini_redirect():
         redir += ":" + os.environ["SERVER_PORT"]
     redir += path
 
-    print("30 " + redir)
+    return redir
 
 class GeminiException(Exception):
     def __init__(self, code, msg):
