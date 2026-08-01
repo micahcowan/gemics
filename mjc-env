@@ -1,0 +1,27 @@
+#!/bin/bash
+
+printf "20 text/plain\r\n"
+
+if test "$SERVER_PROTOCOL" = TITAN; then
+    echo '--- Echo! ---'
+    cat
+    echo
+    echo '--- End echo ---'
+    echo
+    echo
+fi
+
+if test "$SERVER_PROTOCOL" = TITAN; then
+if test "$REMOTE_IDENT" = 'cee81f3accf911dd10988544dcf3172d5479263ebdc0d693d7de1a5586665b5d;915cf7947367aed2d321f63004956f3243765d4d369f74f17de8e912ca7c8121'
+then
+    echo
+    echo '*** AUTHORIZED! ***'
+    echo
+else
+    echo
+    echo '*** NOT authorized ***'
+    echo
+fi
+fi
+
+exec env

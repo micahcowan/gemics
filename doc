@@ -1,0 +1,130 @@
+#!/usr/bin/python3
+
+import sys, os
+import posixpath
+from traceback import print_exception
+
+DOCROOT = "/var/gemini/shizdoc"
+
+def main():
+    ident = None
+    if 'REMOTE_IDENT' in os.environ:
+        ident = os.environ['REMOTE_IDENT']
+    proto = "GEMINI"
+    if 'SERVER_PROTOCOL' in os.environ:
+        proto = os.environ['SERVER_PROTOCOL']
+
+    try:
+        if not ident_is_auth(ident):
+            print("61 go away, you're not on the list\r")
+        elif proto == 'TITAN':
+            handle_titan()
+        else:
+            handle_gemini()
+    except GeminiException as e:
+        print(e.response)
+        #sys.stdout.close()
+        #raise e
+        # gmcapsule won't actually issue our response if we exit
+        # non-zero. Print traceback to stderr and exit successfully.
+        print_exception(e, file=sys.stderr)
+        exit(0)
+    except BaseException as e:
+        print("40 unknown error\r")
+        #sys.stdout.close()
+        #raise e
+        # gmcapsule won't actually issue our response if we exit
+        # non-zero. Print traceback to stderr and exit successfully.
+        print_exception(e, file=sys.stderr)
+        exit(0)
+
+def ident_is_auth(ident):
+    # Read in authorization file
+    file = open("admin.ident", "r")
+    auth = [ line.strip() for line in file.readlines() ]
+    file.close()
+
+    return ident in auth
+
+def handle_titan():
+    file = get_titan_file() # (may throw exception)
+
+    # Copy input to the opened-for-write file
+    eol = True # let empty uploads be empty
+    for line in sys.stdin:
+        file.write(line)
+        eol = line.endswith("\n")
+    if not eol:
+        file.write('\n')
+
+    gemini_redirect()
+
+def handle_gemini():
+    path = get_doc_path()
+    exists = os.path.exists(path)
+
+    if exists:
+        file = open(path, "r")
+        print("20 text/gemini\r")
+        for line in file:
+            print(line, end="")
+    else:
+        print("20 text/plain\r")
+        print("No file here - available!")
+
+def get_titan_file():
+    path = get_doc_path()
+    dir = os.path.dirname(path)
+    os.makedirs(dir, exist_ok=True) # consider umask 0o770?
+
+    file = open(path, "w")
+    return file
+
+def get_doc_path():
+    # Get the path atop our CGI script pathname
+    path = ""
+    if 'PATH_INFO' in os.environ:
+        path = os.environ['PATH_INFO']
+    envpath = path
+
+    # Normalize it, resolving any .. or the like
+    path = posixpath.normpath(path)
+
+    # Make extra-sure that there is no '..' component to escape doc root
+    if '..' in path.split(sep='/'):
+        raise Exception(f"sneaky path {envpath}")
+
+    # Remove any leading slashes
+    while path.startswith('/'):
+        path = path[1:]
+
+    path = os.path.join(DOCROOT, path, "index.gmi")
+
+    return path
+
+def gemini_redirect():
+    if "GEMINI_URL_PATH" in os.environ:
+        path = os.environ["GEMINI_URL_PATH"]
+    else:
+        path = os.environ["TITAN_URL_PATH"]
+    if not path.endswith("/"):
+        path += "/"
+    if not path.startswith("/"):
+        path = "/" + path
+
+    redir = "gemini://"
+    redir += os.environ["SERVER_NAME"]
+
+    if "SERVER_PORT" in os.environ and os.environ["SERVER_PORT"] != "1965":
+        redir += ":" + os.environ["SERVER_PORT"]
+    redir += path
+
+    print("30 " + redir)
+
+class GeminiException(Exception):
+    def __init__(self, code, msg):
+        self.response = str(code) + " " + msg + "\r"
+        super().__init__(self.response)
+
+if __name__ == '__main__':
+    main()
