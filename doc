@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+# BUGS: Git operations aren't atomic, concurrency would be dicey!
+
 import sys, os
 import posixpath
 import re
@@ -48,7 +50,41 @@ def ident_is_auth(ident):
 
     return ident in auth
 
+def handle_delete():
+    path = get_doc_path()
+
+    # Display the results of deleting the file from git
+    print("20 text/gemini\r")
+
+    print(f"# DELETING {os.environ['PATH_INFO']}")
+    print()
+    redir = gemini_redirect()
+    print(f"=> {redir}")
+    print()
+
+    print("# Git rm")
+    st = os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} rm {}".format(
+        shquot(LOCALREPO),
+        shquot(DOCROOT),
+        shquot(get_doc_path())
+    ))
+    print(f"Exit: {st}")
+    print()
+
+    print("# Git commit")
+    os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} commit -m {}".format(
+        shquot(LOCALREPO),
+        shquot(DOCROOT),
+        shquot("DEL " + os.environ['PATH_INFO'])
+    ))
+    print(f"Exit: {st}")
+
 def handle_titan():
+    length = os.environ['CONTENT_LENGTH']
+    if (not length) or int(length) == 0:
+        handle_delete()
+        return
+
     file = get_titan_file() # (may throw exception)
 
     # Copy input to the opened-for-write file
@@ -62,6 +98,7 @@ def handle_titan():
 
     #redir = gemini_redirect()
     #print("30 " + redir)
+    #return
 
     # Display the results of committing the new file
     print("20 text/gemini\r")
