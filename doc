@@ -5,6 +5,9 @@
 import sys, os
 import posixpath
 import re
+import subprocess
+
+from subprocess import PIPE
 from traceback import print_exception
 
 DOCROOT = "/var/gemini/shizdoc"
@@ -93,6 +96,7 @@ def handle_titan():
     for line in sys.stdin:
         if line.startswith("!revmsg "):
             # commit message directives
+            revmsg.append('-m')
             revmsg.append(line[len("!revmsg "):].strip())
         else:
             file.write(line)
@@ -101,42 +105,56 @@ def handle_titan():
         file.write('\n')
     file.close()
 
-    #redir = gemini_redirect()
-    #print("30 " + redir)
-    #return
+    addproc = do_git('add', get_doc_path())
+    if addproc.returncode == 0:
+        if len(revmsg) >= 2:
+            revmsg[1] = os.environ['PATH_INFO'] + ": " + revmsg[0]
+        else:
+            revmsg.insert(0, os.environ['PATH_INFO'])
+            revmsg.insert(0, '-m')
+        commitproc = do_git('commit', *revmsg)
+
+    if addproc.returncode == 0 and commitproc.returncode == 0:
+        redir = gemini_redirect()
+        print("30 " + redir)
+        return
 
     # Display the results of committing the new file
-    print("20 text/gemini\r")
+    errpg = "20 text/gemini\r\n"
 
-    print(f"# {os.environ['PATH_INFO']}")
-    print()
+    errpg += f"# {os.environ['PATH_INFO']}: git ERROR occurred!\n"
+    errpg += "\n"
     redir = gemini_redirect()
-    print(f"=> {redir}")
-    print()
+    errpg += f"=> {redir}\n"
+    errpg += "\n"
 
-    print("# Git add")
-    st = os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} add {}".format(
+    errpg += "# Git add\n"
+    errpg += addproc.stdout
+    errpg += f"Exit: {addproc.returncode}\n"
+    errpg += "\n"
+
+    if commitproc:
+        errpg += "# Git commit\n"
+        errpg += commitproc.stdout
+        errpg += f"Exit: {commitproc.returncode}\n"
+
+    print(errpg)
+
+def do_git(cmd, *args):
+    argstr = ""
+    for arg in args:
+        argstr += f" {shquot(arg)}"
+    cmdstr = "HOME=/dev/null; export LC_ALL=C; exec 2>&1 </dev/null; set -x; git --git-dir={} --work-tree={} {} {}".format(
         shquot(LOCALREPO),
         shquot(DOCROOT),
-        shquot(get_doc_path())
-    ))
-    print(f"Exit: {st}")
-    print()
+        shquot(cmd),
+        argstr
+    )
 
-    if len(revmsg) > 0:
-        revmsg[0] = os.environ['PATH_INFO'] + ": " + revmsg[0]
-    else:
-        revmsg.append(os.environ['PATH_INFO'])
-    msg = ''
-    for r in revmsg:
-        msg += f" -m {shquot(r)}"
-    print("# Git commit")
-    os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} commit {}".format(
-        shquot(LOCALREPO),
-        shquot(DOCROOT),
-        msg
-    ))
-    print(f"Exit: {st}")
+    # TODO: eliminate use of shell = True?
+    proc = subprocess.run(cmdstr, stdout=PIPE, text = True, encoding = "us-ascii", shell = True)
+
+    return proc
 
 def shquot(msg):
     val = re.sub("'", """'"'"'""", msg)
