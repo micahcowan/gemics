@@ -89,8 +89,13 @@ def handle_titan():
 
     # Copy input to the opened-for-write file
     eol = True # let empty uploads be empty
+    revmsg = []
     for line in sys.stdin:
-        file.write(line)
+        if line.startswith("!revmsg "):
+            # commit message directives
+            revmsg.append(line[len("!revmsg "):].strip())
+        else:
+            file.write(line)
         eol = line.endswith("\n")
     if not eol:
         file.write('\n')
@@ -118,11 +123,18 @@ def handle_titan():
     print(f"Exit: {st}")
     print()
 
+    if len(revmsg) > 0:
+        revmsg[0] = os.environ['PATH_INFO'] + ": " + revmsg[0]
+    else:
+        revmsg.append(os.environ['PATH_INFO'])
+    msg = ''
+    for r in revmsg:
+        msg += f" -m {shquot(r)}"
     print("# Git commit")
-    os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} commit -m {}".format(
+    os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} commit {}".format(
         shquot(LOCALREPO),
         shquot(DOCROOT),
-        shquot(os.environ['PATH_INFO'])
+        msg
     ))
     print(f"Exit: {st}")
 
