@@ -66,21 +66,15 @@ def handle_delete():
     print()
 
     print("# Git rm")
-    st = os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} rm {}".format(
-        shquot(LOCALREPO),
-        shquot(DOCROOT),
-        shquot(get_doc_path())
-    ))
-    print(f"Exit: {st}")
+    rmst, rmout = do_git('rm', get_doc_path())
+    print(rmout, end = '')
+    print(f"Exit: {rmst}")
     print()
 
     print("# Git commit")
-    os.system("HOME=/dev/null; exec 2>&1; set -x; git --git-dir={} --work-tree={} commit -m {}".format(
-        shquot(LOCALREPO),
-        shquot(DOCROOT),
-        shquot("DEL " + os.environ['PATH_INFO'])
-    ))
-    print(f"Exit: {st}")
+    commitst, commitout = do_git('commit', '-m', "DEL " + os.environ['PATH_INFO'])
+    print(commitout, end = '')
+    print(f"Exit: {commitst}")
 
 def handle_titan():
     length = os.environ['CONTENT_LENGTH']
@@ -105,16 +99,16 @@ def handle_titan():
         file.write('\n')
     file.close()
 
-    addproc = do_git('add', get_doc_path())
-    if addproc.returncode == 0:
+    addst, addout = do_git('add', get_doc_path())
+    if addst == 0:
         if len(revmsg) >= 2:
-            revmsg[1] = os.environ['PATH_INFO'] + ": " + revmsg[0]
+            revmsg[1] = os.environ['PATH_INFO'] + ": " + revmsg[1]
         else:
             revmsg.insert(0, os.environ['PATH_INFO'])
             revmsg.insert(0, '-m')
-        commitproc = do_git('commit', *revmsg)
+        commitst, commitout = do_git('commit', *revmsg)
 
-    if addproc.returncode == 0 and commitproc.returncode == 0:
+    if addst == 0 and commitst == 0:
         redir = gemini_redirect()
         print("30 " + redir)
         return
@@ -129,14 +123,14 @@ def handle_titan():
     errpg += "\n"
 
     errpg += "# Git add\n"
-    errpg += addproc.stdout
-    errpg += f"Exit: {addproc.returncode}\n"
+    errpg += addout
+    errpg += f"Exit: {addst}\n"
     errpg += "\n"
 
-    if commitproc:
+    if commitout is not None:
         errpg += "# Git commit\n"
-        errpg += commitproc.stdout
-        errpg += f"Exit: {commitproc.returncode}\n"
+        errpg += commitout
+        errpg += f"Exit: {commitst}\n"
 
     print(errpg)
 
@@ -152,9 +146,12 @@ def do_git(cmd, *args):
     )
 
     # TODO: eliminate use of shell = True?
-    proc = subprocess.run(cmdstr, stdout=PIPE, text = True, encoding = "us-ascii", shell = True)
+    proc = subprocess.run(cmdstr, stdout=PIPE, shell = True)
 
-    return proc
+    # Program output is in bytes. We want a string.
+    # We set LC_ALL=C to ascii, but it's still possible some stray bytes could
+    # could appear.
+    return proc.returncode, proc.stdout.decode("us-ascii", "backslashreplace")
 
 def shquot(msg):
     val = re.sub("'", """'"'"'""", msg)
