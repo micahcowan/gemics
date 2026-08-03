@@ -62,7 +62,7 @@ def handle_delete():
 
     print(f"# DELETING {os.environ['PATH_INFO']}")
     print()
-    redir = gemini_redirect()
+    redir = admin_redirect()
     print(f"=> {redir}")
     print()
 
@@ -110,7 +110,7 @@ def handle_titan():
         commitst, commitout = do_git('commit', *revmsg)
 
     if addst == 0 and commitst == 0:
-        redir = gemini_redirect()
+        redir = admin_redirect()
         print("30 " + redir)
         return
 
@@ -119,7 +119,7 @@ def handle_titan():
 
     errpg += f"# {os.environ['PATH_INFO']}: git ERROR occurred!\n"
     errpg += "\n"
-    redir = gemini_redirect()
+    redir = admin_redirect()
     errpg += f"=> {redir}\n"
     errpg += "\n"
 
@@ -176,7 +176,7 @@ def get_titan_file():
     file = open(path, "w")
     return file
 
-def get_doc_path():
+def normalize_path_info(no_admin = False):
     # Get the path atop our CGI script pathname
     path = ""
     if 'PATH_INFO' in os.environ:
@@ -190,6 +190,20 @@ def get_doc_path():
     if '..' in path.split(sep='/'):
         raise Exception(f"sneaky path {envpath}")
 
+    # Ensure it starts with a leading slash
+    if not path.startswith("/"):
+        path = "/" + path
+
+    # Strip out any leading "/:admin"
+    if no_admin:
+        pfx = "/:admin"
+        if path.startswith(pfx + "/") or path == pfx:
+            path = path[len(pfx):]
+
+    return path
+
+def get_doc_path():
+    path = normalize_path_info(no_admin = True)
     # Remove any leading slashes
     while path.startswith('/'):
         path = path[1:]
@@ -198,15 +212,18 @@ def get_doc_path():
 
     return path
 
-def gemini_redirect():
-    if "GEMINI_URL_PATH" in os.environ:
-        path = os.environ["GEMINI_URL_PATH"]
-    else:
-        path = os.environ["TITAN_URL_PATH"]
+def gemini_redirect(path_pfx = "", no_admin = False):
+    path = normalize_path_info(no_admin)
     if not path.endswith("/"):
         path += "/"
-    if not path.startswith("/"):
-        path = "/" + path
+    path = path_pfx + path
+
+    scrnam = ""
+    if "SCRIPT_NAME" in os.environ:
+        scrnam = os.environ["SCRIPT_NAME"]
+        if not scrnam.startswith("/"):
+            scrnam = "/" + scrnam
+    path = scrnam + path
 
     redir = "gemini://"
     redir += os.environ["SERVER_NAME"]
@@ -217,12 +234,16 @@ def gemini_redirect():
 
     return redir
 
+def admin_redirect():
+    # Ensure it gets an :admin URL (and strip out any existing)
+    return gemini_redirect(path_pfx = "/:admin", no_admin = True)
+
 def get_page_view():
     doc = get_doc_path()
-    if os.environ['PATH_INFO'].startswith("/:admin/"):
-        return AdminPageView(doc)
-    elif ("TITAN_EDIT" in os.environ) and os.environ["TITAN_EDIT"]:
+    if ("TITAN_EDIT" in os.environ) and os.environ["TITAN_EDIT"]:
         return EditPageView(doc)
+    elif os.environ['PATH_INFO'].startswith("/:admin/"):
+        return AdminPageView(doc)
     else:
         return NormalPageView(doc)
 
@@ -236,7 +257,7 @@ class PageView():
 class FileBackedPageView(PageView):
     """Base class for page views that are backed by an on-disk file"""
 
-    def __init__(self, docpath = None):
+    def __init__(self, docpath):
         """Initialize a FileBackedPageView, with an optional path to the page's contents"""
         self._path = docpath
 
@@ -253,12 +274,7 @@ class FileBackedPageView(PageView):
         file = open(self.path(), "r", encoding = encoding, errors = errors)
         if not file:
             raise FileNotFoundError(f"file not found: {self.path()}")
-        for line in file:
-            yield line
-
-        text = file.read()
-        file.close()
-        return text
+        return iterate_and_close(file)
 
     def print_response(self):
         try:
@@ -269,6 +285,11 @@ class FileBackedPageView(PageView):
         except FileNotFoundError as e:
             print("51 not found\r")
 
+def iterate_and_close(file):
+    for line in file:
+        yield line
+    file.close()
+
 class NormalPageView(FileBackedPageView):
     pass
 
@@ -276,7 +297,17 @@ class EditPageView(FileBackedPageView):
     pass
 
 class AdminPageView(FileBackedPageView):
-    pass
+    def print_response(self):
+        try:
+            text = self.raw_text()
+            print("20 text/gemini\r")
+            print(f"# Admin view: {self.path()}")
+            if "TITAN_EDIT" in os.environ:
+                print("TITAN_EDIT = " + os.environ["TITAN_EDIT"])
+            for line in text:
+                print(line, end = "")
+        except FileNotFoundError as e:
+            print("51 not found\r")
 
 class GeminiException(Exception):
     def __init__(self, code, msg):
