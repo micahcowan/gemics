@@ -139,7 +139,7 @@ def do_git(cmd, *args):
     argstr = ""
     for arg in args:
         argstr += f" {shquot(arg)}"
-    cmdstr = "HOME=/dev/null; export LC_ALL=C; exec 2>&1 </dev/null; set -x; git --git-dir={} --work-tree={} {} {}".format(
+    cmdstr = "HOME=/dev/null; export LC_ALL=C GIT_DIR={} GIT_WORK_TREE={}; exec 2>&1 </dev/null; set -x; git {} {}".format(
         shquot(LOCALREPO),
         shquot(DOCROOT),
         shquot(cmd),
@@ -205,7 +205,11 @@ def normalize_path_info(no_admin = False):
 
     return path
 
+CACHED_DOC_PATH = None
 def get_doc_path():
+    global CACHED_DOC_PATH
+    if CACHED_DOC_PATH is not None:
+        return CACHED_DOC_PATH
     path = normalize_path_info(no_admin = True)
     # Remove any leading slashes
     while path.startswith('/'):
@@ -213,9 +217,10 @@ def get_doc_path():
 
     path = os.path.join(DOCROOT, path, "index.gmi")
 
+    CACHED_DOC_PATH = path
     return path
 
-def gemini_redirect(path_pfx = "", no_admin = False):
+def gemini_redirect(path_pfx = "", no_admin = False, proto = "gemini"):
     path = normalize_path_info(no_admin)
     if not path.endswith("/"):
         path += "/"
@@ -228,7 +233,7 @@ def gemini_redirect(path_pfx = "", no_admin = False):
             scrnam = "/" + scrnam
     path = scrnam + path
 
-    redir = "gemini://"
+    redir = proto + "://"
     redir += os.environ["SERVER_NAME"]
 
     if "SERVER_PORT" in os.environ and os.environ["SERVER_PORT"] != "1965":
@@ -236,6 +241,9 @@ def gemini_redirect(path_pfx = "", no_admin = False):
     redir += path
 
     return redir
+
+def get_edit_link():
+    return gemini_redirect(no_admin = True, proto = "titan") + ";edit"
 
 def admin_redirect():
     # Ensure it gets an :admin URL (and strip out any existing)
@@ -303,14 +311,59 @@ class AdminPageView(FileBackedPageView):
     def print_response(self):
         try:
             text = self.raw_text()
-            print("20 text/gemini\r")
-            print(f"# Admin view: {normalize_path_info(no_admin = True)}")
-            if "TITAN_EDIT" in os.environ:
-                print("TITAN_EDIT = " + os.environ["TITAN_EDIT"])
+        except FileNotFoundError as e:
+            text = None
+        print("20 text/gemini\r")
+        print(f"### Admin controls: {normalize_path_info(no_admin = True)}")
+        path = normalize_path_info(no_admin = True)
+        if text is not None:
+            self._print_commit()
+            print(f"=> {gemini_redirect(no_admin = True)} View {path}")
+            print(f"=> {get_edit_link()} Edit {path}")
+        else:
+            print(f"=> {get_edit_link()} Create new page at {path}")
+        print()
+        self._print_directory()
+        print()
+        print("### Page content:")
+        if text is not None:
+            # Print the page content
             for line in text:
                 print(line, end = "")
-        except FileNotFoundError as e:
-            print("51 not found\r")
+
+    def _print_directory(self):
+        path = normalize_path_info(no_admin = True)
+        while path.startswith("/"): path = path[1:]
+        if path.endswith("/"): path = path[:-1]
+        st, out = do_git('ls-tree', "HEAD:" + path)
+        subdirs = []
+        if st == 0:
+            for line in out.split("\n"):
+                fields = line.split(maxsplit = 3)
+                if len(fields) != 4:
+                    continue
+                if fields[1] == "tree":
+                    subdirs.append(fields[3] + "/")
+        if len(subdirs) == 0:
+            print("(no sub-entries found)")
+        else:
+            p = f"/{path}/"
+            if p == "//": p = "/"
+            print(f"Entries under {p}:")
+            for sub in subdirs:
+                print(f"=> {sub}")
+
+    def _print_commit(self):
+        path = normalize_path_info(no_admin = True)
+        while path.startswith("/"): path = path[1:]
+        if path.endswith("/"): path = path[:-1]
+        st, out = do_git("log", '-n', '1', '--', path)
+        if st == 0:
+            print("```")
+            lines = out.split("\n")
+            lines = [lines[1]] + lines[3:]
+            print("\n".join(lines))
+            print("```")
 
 class GeminiException(Exception):
     def __init__(self, code, msg):
