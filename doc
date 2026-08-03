@@ -326,13 +326,15 @@ class AdminPageView(FileBackedPageView):
         print()
         self._print_directory()
         print()
-        print("### Page content:")
         if text is not None:
+            print("### Page content:")
             # Print the page content
             for line in text:
                 if line.startswith("=>"):
                     line = self._adminify_link(line)
                 print(line, end = "")
+        else:
+            print('### (no page)')
 
     def _adminify_link(self, line):
         """Transform relative links within the doctree, to :admin links"""
