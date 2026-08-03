@@ -13,6 +13,7 @@ from traceback import print_exception
 DOCROOT = "/var/gemini/shizdoc"
 LOCALREPO = "/home/gmcapsule/shizdoc.git"
 
+
 def main():
     ident = None
     if 'REMOTE_IDENT' in os.environ:
@@ -159,17 +160,13 @@ def shquot(msg):
     return val
 
 def handle_gemini():
-    path = get_doc_path()
-    exists = os.path.exists(path)
+    if not os.environ['PATH_INFO'].endswith('/'):
+        # Redirect to slash-ending version
+        redir = gemini_redirect()
+        print(f"30 {redir}\r")
 
-    if exists:
-        file = open(path, "r")
-        print("20 text/gemini\r")
-        for line in file:
-            print(line, end="")
-    else:
-        print("20 text/plain\r")
-        print("No file here - available!")
+    page = get_page_view()
+    page.print_response()
 
 def get_titan_file():
     path = get_doc_path()
@@ -219,6 +216,67 @@ def gemini_redirect():
     redir += path
 
     return redir
+
+def get_page_view():
+    doc = get_doc_path()
+    if os.environ['PATH_INFO'].startswith("/:admin/"):
+        return AdminPageView(doc)
+    elif ("TITAN_EDIT" in os.environ) and os.environ["TITAN_EDIT"]:
+        return EditPageView(doc)
+    else:
+        return NormalPageView(doc)
+
+class PageView():
+    """PageView (base class)"""
+
+    def print_response():
+        """print the response for this page view"""
+        raise(Exception("PageView base class used"))
+
+class FileBackedPageView(PageView):
+    """Base class for page views that are backed by an on-disk file"""
+
+    def __init__(self, docpath = None):
+        """Initialize a FileBackedPageView, with an optional path to the page's contents"""
+        self._path = docpath
+
+    def exists(self):
+        """returns True if self.path() exists"""
+        return os.path.exists(self._path)
+
+    def path(self):
+        """returns the page doc's path passed to the constructor"""
+        return self._path
+
+    def raw_text(self, encoding = "utf-8", errors = 'replace'):
+        """generator for the lines of text in the file that backs this page view. Throws an exception if file does not exist."""
+        file = open(self.path(), "r", encoding = encoding, errors = errors)
+        if not file:
+            raise FileNotFoundError(f"file not found: {self.path()}")
+        for line in file:
+            yield line
+
+        text = file.read()
+        file.close()
+        return text
+
+    def print_response(self):
+        try:
+            text = self.raw_text()
+            print("20 text/gemini\r")
+            for line in text:
+                print(line, end = "")
+        except FileNotFoundError as e:
+            print("51 not found\r")
+
+class NormalPageView(FileBackedPageView):
+    pass
+
+class EditPageView(FileBackedPageView):
+    pass
+
+class AdminPageView(FileBackedPageView):
+    pass
 
 class GeminiException(Exception):
     def __init__(self, code, msg):
