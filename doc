@@ -9,6 +9,7 @@ import subprocess
 
 from subprocess import PIPE
 from traceback import print_exception
+from urllib.parse import urlparse, urlunparse
 
 DOCROOT = "/var/gemini/shizdoc"
 LOCALREPO = "/home/gmcapsule/shizdoc.git"
@@ -329,7 +330,42 @@ class AdminPageView(FileBackedPageView):
         if text is not None:
             # Print the page content
             for line in text:
+                if line.startswith("=>"):
+                    line = self._adminify_link(line)
                 print(line, end = "")
+
+    def _adminify_link(self, line):
+        """Transform relative links within the doctree, to :admin links"""
+        fields = line.split()
+        link = fields[1]
+        parsed = urlparse(link)
+        if parsed.scheme:
+            return line
+        path = parsed.path
+        scrnam = os.environ['SCRIPT_NAME']
+        pfx = os.environ['GEMINI_URL_PATH']
+        path = posixpath.join(pfx, path)
+        path = posixpath.normpath(path)
+
+        if (path == scrnam
+                or (path.startswith(scrnam + "/"))):
+            path = path[len(scrnam):] # remove up to the start of PATH_INFO
+            adm = "/:admin"
+            if path == adm or path.startswith(adm + "/"):
+                return line # link was already adminified!
+            path = scrnam + "/:admin" + path
+            fields[1] = urlunparse((
+                parsed.scheme,
+                parsed.netloc,
+                path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment
+            ))
+            line = " ".join(fields) + "\n"
+            return line
+        else:
+            return line
 
     def _print_directory(self):
         path = normalize_path_info(no_admin = True)
