@@ -60,7 +60,7 @@ def handle_delete():
     # Display the results of deleting the file from git
     print("20 text/gemini\r")
 
-    print(f"# DELETING {os.environ['PATH_INFO']}")
+    print(f"# DELETING {normalize_path_info(no_admin = True)}")
     print()
     redir = admin_redirect()
     print(f"=> {redir}")
@@ -117,7 +117,7 @@ def handle_titan():
     # Display the results of committing the new file
     errpg = "20 text/gemini\r\n"
 
-    errpg += f"# {os.environ['PATH_INFO']}: git ERROR occurred!\n"
+    errpg += f"# {normalize_path_info(no_admin = True)}: git ERROR occurred!\n"
     errpg += "\n"
     redir = admin_redirect()
     errpg += f"=> {redir}\n"
@@ -182,9 +182,12 @@ def normalize_path_info(no_admin = False):
     if 'PATH_INFO' in os.environ:
         path = os.environ['PATH_INFO']
     envpath = path
+    es = path.endswith("/")
 
     # Normalize it, resolving any .. or the like
     path = posixpath.normpath(path)
+    if es and not path.endswith("/"):
+        path += "/"
 
     # Make extra-sure that there is no '..' component to escape doc root
     if '..' in path.split(sep='/'):
@@ -301,7 +304,7 @@ class AdminPageView(FileBackedPageView):
         try:
             text = self.raw_text()
             print("20 text/gemini\r")
-            print(f"# Admin view: {self.path()}")
+            print(f"# Admin view: {normalize_path_info(no_admin = True)}")
             if "TITAN_EDIT" in os.environ:
                 print("TITAN_EDIT = " + os.environ["TITAN_EDIT"])
             for line in text:
