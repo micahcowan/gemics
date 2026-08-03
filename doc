@@ -306,7 +306,16 @@ class NormalPageView(FileBackedPageView):
     pass
 
 class EditPageView(FileBackedPageView):
-    pass
+    def print_response(self):
+        try:
+            text = self.raw_text()
+            print("20 text/gemini\r")
+            for line in text:
+                print(line, end = "")
+        except FileNotFoundError as e:
+            # Provide an empty page, even though none exists,
+            # so that the user may still successfully open an editor
+            print("20 text/gemini\r")
 
 class AdminPageView(FileBackedPageView):
     def print_response(self):
