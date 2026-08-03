@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 # BUGS: Git operations aren't atomic, concurrency would be dicey!
 
@@ -11,10 +11,6 @@ from subprocess import PIPE
 from traceback import print_exception
 from urllib.parse import urlparse, urlunparse
 
-DOCROOT = "/var/gemini/shizdoc"
-LOCALREPO = "/home/gmcapsule/shizdoc.git"
-
-
 def main():
     ident = None
     if 'REMOTE_IDENT' in os.environ:
@@ -22,6 +18,16 @@ def main():
     proto = "GEMINI"
     if 'SERVER_PROTOCOL' in os.environ:
         proto = os.environ['SERVER_PROTOCOL']
+
+    reqenv = ['GEMICS_DOCROOT', 'GEMICS_LOCALREPO']
+    hasenv = [ e for e in reqenv if e in os.environ ]
+    if reqenv != hasenv:
+        print("40 gemics not configured (missing GEMINI_DOCROOT and/or GEMINI_LOCALREPO!)\r")
+        return
+
+    global DOCROOT, LOCALREPO
+    DOCROOT = os.environ['GEMICS_DOCROOT']
+    LOCALREPO = os.environ['GEMICS_LOCALREPO']
 
     try:
         if not ident_is_auth(ident):
