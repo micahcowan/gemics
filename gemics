@@ -9,7 +9,7 @@ import subprocess
 
 from subprocess import PIPE
 from traceback import print_exception
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, quote as urlquote
 
 def main():
     ident = None
@@ -245,7 +245,7 @@ def gemini_redirect(path_pfx = "", no_admin = False, proto = "gemini"):
 
     if "SERVER_PORT" in os.environ and os.environ["SERVER_PORT"] != "1965":
         redir += ":" + os.environ["SERVER_PORT"]
-    redir += path
+    redir += urlquote(path)
 
     return redir
 
@@ -391,7 +391,7 @@ class AdminPageView(FileBackedPageView):
         while path.startswith("/"): path = path[1:]
         if path.endswith("/"): path = path[:-1]
         docroot = os.environ['SCRIPT_NAME']
-        print(f"=> {docroot}/:admin/ {docroot}/")
+        print(f"=> {urlquote(docroot)}/:admin/ {docroot}/")
         if path != "":
             print("=> ../")
         st, out = do_git('ls-tree', "HEAD:" + path)
@@ -406,11 +406,9 @@ class AdminPageView(FileBackedPageView):
         if len(subdirs) == 0:
             pass #print("(no sub-entries found)")
         else:
-            p = f"/{path}/"
-            if p == "//": p = "/"
             print("----")
             for sub in subdirs:
-                print(f"=> {sub}")
+                print(f"=> {urlquote(sub)} {sub}")
 
     def _print_commit(self):
         path = normalize_path_info(no_admin = True)
