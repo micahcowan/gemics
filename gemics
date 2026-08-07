@@ -69,7 +69,7 @@ def handle_delete():
 
     print(f"# DELETING {normalize_path_info(no_admin = True)}")
     print()
-    redir = admin_redirect()
+    redir = gemini_redirect()
     print(f"=> {redir}")
     print()
 
@@ -107,7 +107,8 @@ def handle_titan():
         file.write('\n')
     file.close()
 
-    addst, addout = do_git('add', get_doc_path())
+    doc = get_doc_path()
+    addst, addout = do_git('add', doc)
     if addst == 0:
         if len(revmsg) >= 2:
             revmsg[1] = os.environ['PATH_INFO'] + ": " + revmsg[1]
@@ -117,8 +118,8 @@ def handle_titan():
         commitst, commitout = do_git('commit', *revmsg)
 
     if addst == 0 and commitst == 0:
-        redir = admin_redirect()
-        print("30 " + redir)
+        view = JustEditedPageView(doc)
+        view.print_response()
         return
 
     # Display the results of committing the new file
@@ -263,13 +264,74 @@ def get_page_view():
     elif os.environ['PATH_INFO'].startswith("/:admin/"):
         return AdminPageView(doc)
     else:
-        return NormalPageView(doc)
+        return WriteablePageView(doc)
+
+def iterate_and_close(file):
+    for line in file:
+        yield line
+    file.close()
+
+def adminify_link(line):
+    """Transform relative links within the doctree, to :admin links"""
+    fields = line.split()
+    link = fields[1]
+    parsed = urlparse(link)
+    if parsed.scheme:
+        return line
+    path = parsed.path
+    scrnam = os.environ['SCRIPT_NAME']
+    scheme = 'gemini'
+    try:
+        pfx = os.environ['GEMINI_URL_PATH']
+    except KeyError:
+        pfx = os.environ['TITAN_URL_PATH']
+        scheme = 'titan'
+    path = posixpath.join(pfx, path)
+    path = posixpath.normpath(path)
+
+    if (path == scrnam
+            or (path.startswith(scrnam + "/"))):
+        path = path[len(scrnam):] # remove up to the start of PATH_INFO
+        adm = "/:admin"
+        if path == adm or path.startswith(adm + "/"):
+            return line # link was already adminified!
+        path = scrnam + "/:admin" + path
+        hostname = os.environ['SERVER_NAME']
+        if "SERVER_PORT" in os.environ and os.environ["SERVER_PORT"] != "1965":
+            hostname += ":" + os.environ["SERVER_PORT"]
+        fields[1] = urlunparse((
+            'gemini',
+            hostname,
+            path,
+            parsed.params,
+            parsed.query,
+            parsed.fragment
+        ))
+        line = " ".join(fields) + "\n"
+        return line
+    else:
+        return line
+
+def _prlines(lines):
+    """
+    Print each lines in the `lines` iterator.
+    Used by descendants of `PageView`.
+    """
+    for line in lines:
+        print(line, end="")
+
+def _identity(thing):
+    return thing
 
 class PageView():
     """PageView (base class)"""
 
-    def print_response():
-        """print the response for this page view"""
+    def print_response(self, filter):
+        """
+        Print the response for this page view.
+        If the response would be success, and `filter` is not None,
+        an iterator over lines (including line-endings) is passed to it.
+        """
         raise(Exception("PageView base class used"))
 
 class FileBackedPageView(PageView):
@@ -294,106 +356,123 @@ class FileBackedPageView(PageView):
             raise FileNotFoundError(f"file not found: {self.path()}")
         return iterate_and_close(file)
 
-    def print_response(self):
+    def print_response(self, filter = _identity):
         try:
-            text = self.raw_text()
+            text = self.raw_text() # before response—might throw!
             print("20 text/gemini\r")
-            for line in text:
-                print(line, end = "")
+            _prlines(filter(text))
         except FileNotFoundError as e:
             print("51 not found\r")
-
-def iterate_and_close(file):
-    for line in file:
-        yield line
-    file.close()
 
 class NormalPageView(FileBackedPageView):
     pass
 
-class EditPageView(FileBackedPageView):
-    def print_response(self):
+class WriteablePageView(FileBackedPageView):
+    """
+    Used in place of NormalPageView, when the user has write privileges
+    for the page.
+
+    Just adds edit/admin links for the page.
+    """
+
+    def print_response(self, filter = _identity):
+        path = normalize_path_info(no_admin = True)
         try:
             text = self.raw_text()
             print("20 text/gemini\r")
-            for line in text:
-                print(line, end = "")
+            def iter():
+                yield f"=> {get_edit_link()} Edit {path}\n"
+                yield adminify_link(f"=> ./ ⚙️ Admin: {path}\n")
+                yield "\n"
+                for line in text:
+                    yield line
+            _prlines(filter(iter()))
+        except FileNotFoundError as e:
+            print("20 text/gemini\r")
+            print(f"=> {get_edit_link()} Create new page at {path}")
+
+class JustEditedPageView(WriteablePageView):
+    """
+    Used by `handle_titan()` when a page edit succeeds.
+    Provides the latest git commit info for the page, and otherwise same
+    as `WriteablePageView`.
+    """
+    def print_response(self, filter = _identity):
+        def prepend_commit(lines):
+            path = normalize_path_info(no_admin = True)
+            while path.startswith("/"): path = path[1:]
+            if path.endswith("/"): path = path[:-1]
+            st, out = do_git("log", '-n', '1', '--pretty=%as  %h  %s%n', '--', path)
+            if st == 0:
+                yield "```\n"
+                yield out
+                yield "```\n"
+
+            # Remaining lines are passed straight-through
+            for line in lines:
+                yield line
+        super().print_response(prepend_commit)
+
+class EditPageView(FileBackedPageView):
+    def print_response(self):
+        """
+        This implementation does not use any passed-in filter, since
+        the intent is to present a raw document source.
+        """
+        try:
+            text = self.raw_text()
+            print("20 text/gemini\r")
+            _prlines(text)
         except FileNotFoundError as e:
             # Provide an empty page, even though none exists,
             # so that the user may still successfully open an editor
             print("20 text/gemini\r")
 
 class AdminPageView(FileBackedPageView):
-    def print_response(self):
+    def print_response(self, filter = _identity):
         try:
             text = self.raw_text()
         except FileNotFoundError as e:
             text = None
         print("20 text/gemini\r")
-        print(f"### Admin controls: {normalize_path_info(no_admin = True)}")
-        path = normalize_path_info(no_admin = True)
-        if text is not None:
-            self._print_commit()
-            print(f"=> {gemini_redirect(no_admin = True)} View {path}")
-            print(f"=> {get_edit_link()} Edit {path}")
-        else:
-            print(f"=> {get_edit_link()} Create new page at {path}")
-        print()
-        self._print_directory()
-        print()
-        if text is not None:
-            print("### Page content:")
-            # Print the page content
-            for line in text:
-                if line.startswith("=>"):
-                    line = self._adminify_link(line)
-                print(line, end = "")
-        else:
-            print('### (no page)')
 
-    def _adminify_link(self, line):
-        """Transform relative links within the doctree, to :admin links"""
-        fields = line.split()
-        link = fields[1]
-        parsed = urlparse(link)
-        if parsed.scheme:
-            return line
-        path = parsed.path
-        scrnam = os.environ['SCRIPT_NAME']
-        pfx = os.environ['GEMINI_URL_PATH']
-        path = posixpath.join(pfx, path)
-        path = posixpath.normpath(path)
+        def iter():
+            yield f"### Admin controls: {normalize_path_info(no_admin = True)}\n"
+            path = normalize_path_info(no_admin = True)
+            if text is not None:
+                self._print_commit()
+                yield f"=> {get_edit_link()} 📝 Edit {path}\n"
+                yield f"=> {gemini_redirect(no_admin = True)} View {path}\n"
+            else:
+                yield f"=> {get_edit_link()} Create new page at {path}\n"
+            yield "\n"
+            self._print_directory()
+            yield "\n"
+            if text is not None:
+                yield "### Page content:\n"
+                # Print the page content
+                for line in text:
+                    if line.startswith("=>"):
+                        line = adminify_link(line)
+                    yield line
+            else:
+                yield "### (no page)\n"
 
-        if (path == scrnam
-                or (path.startswith(scrnam + "/"))):
-            path = path[len(scrnam):] # remove up to the start of PATH_INFO
-            adm = "/:admin"
-            if path == adm or path.startswith(adm + "/"):
-                return line # link was already adminified!
-            path = scrnam + "/:admin" + path
-            fields[1] = urlunparse((
-                parsed.scheme,
-                parsed.netloc,
-                path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment
-            ))
-            line = " ".join(fields) + "\n"
-            return line
-        else:
-            return line
+        _prlines(filter(iter()))
 
     def _print_directory(self):
-        """Print a directory of the doc entries available under this one"""
-        print("### dir:")
+        """
+        Generate a directory listing of the doc entries available
+        under this one.
+        """
+        yield "### dir:\n"
         path = normalize_path_info(no_admin = True)
         while path.startswith("/"): path = path[1:]
         if path.endswith("/"): path = path[:-1]
         docroot = os.environ['SCRIPT_NAME']
-        print(f"=> {urlquote(docroot)}/:admin/ {docroot}/")
+        yield f"=> {urlquote(docroot)}/:admin/ {docroot}/\n"
         if path != "":
-            print("=> ../")
+            yield "=> ../"
         st, out = do_git('ls-tree', "HEAD:" + path)
         subdirs = []
         if st == 0:
@@ -404,23 +483,25 @@ class AdminPageView(FileBackedPageView):
                 if fields[1] == "tree":
                     subdirs.append(fields[3] + "/")
         if len(subdirs) == 0:
-            pass #print("(no sub-entries found)")
+            pass
         else:
-            print("----")
+            yield "----\n"
             for sub in subdirs:
-                print(f"=> {urlquote(sub)} {sub}")
+                yield f"=> {urlquote(sub)} {sub}"
 
     def _print_commit(self):
+        """Generate the lines of the latest commit info for this doc."""
         path = normalize_path_info(no_admin = True)
         while path.startswith("/"): path = path[1:]
         if path.endswith("/"): path = path[:-1]
         st, out = do_git("log", '-n', '1', '--', path)
         if st == 0:
-            print("```")
+            yield "```\n"
             lines = out.split("\n")
             lines = [lines[1]] + lines[3:]
-            print("\n".join(lines))
-            print("```")
+            for line in lines:
+                yield line + "\n"
+            yield "```\n"
 
 class GeminiException(Exception):
     def __init__(self, code, msg):
