@@ -443,8 +443,8 @@ class AdminPageView(FileBackedPageView):
             if text is not None:
                 for line in self._print_commit():
                     yield line
-                yield f"=> {get_edit_link()} 📝 Edit {path}\n"
-                yield f"=> {gemini_redirect(no_admin = True)} View {path}\n"
+                yield f"=> {get_edit_link()} Edit {path}\n"
+                yield f"=> {gemini_redirect(no_admin = True)} 👓 View {path}\n"
             else:
                 yield f"=> {get_edit_link()} Create new page at {path}\n"
             yield "\n"
