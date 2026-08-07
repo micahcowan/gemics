@@ -390,6 +390,7 @@ class WriteablePageView(FileBackedPageView):
         except FileNotFoundError as e:
             print("20 text/gemini\r")
             print(f"=> {get_edit_link()} Create new page at {path}")
+            print(adminify_link(f"=> ./ ⚙️ Admin: {path}\n"))
 
 class JustEditedPageView(WriteablePageView):
     """
@@ -440,13 +441,15 @@ class AdminPageView(FileBackedPageView):
             yield f"### Admin controls: {normalize_path_info(no_admin = True)}\n"
             path = normalize_path_info(no_admin = True)
             if text is not None:
-                self._print_commit()
+                for line in self._print_commit():
+                    yield line
                 yield f"=> {get_edit_link()} 📝 Edit {path}\n"
                 yield f"=> {gemini_redirect(no_admin = True)} View {path}\n"
             else:
                 yield f"=> {get_edit_link()} Create new page at {path}\n"
             yield "\n"
-            self._print_directory()
+            for line in self._print_directory():
+                yield line
             yield "\n"
             if text is not None:
                 yield "### Page content:\n"
@@ -472,7 +475,7 @@ class AdminPageView(FileBackedPageView):
         docroot = os.environ['SCRIPT_NAME']
         yield f"=> {urlquote(docroot)}/:admin/ {docroot}/\n"
         if path != "":
-            yield "=> ../"
+            yield "=> ../\n"
         st, out = do_git('ls-tree', "HEAD:" + path)
         subdirs = []
         if st == 0:
@@ -487,7 +490,7 @@ class AdminPageView(FileBackedPageView):
         else:
             yield "----\n"
             for sub in subdirs:
-                yield f"=> {urlquote(sub)} {sub}"
+                yield f"=> {urlquote(sub)} {sub}\n"
 
     def _print_commit(self):
         """Generate the lines of the latest commit info for this doc."""
