@@ -109,6 +109,7 @@ def handle_titan():
 
     doc = get_doc_path()
     addst, addout = do_git('add', doc)
+    commitst, commitout = None, None
     if addst == 0:
         if len(revmsg) >= 2:
             revmsg[1] = os.environ['PATH_INFO'] + ": " + revmsg[1]
@@ -122,7 +123,7 @@ def handle_titan():
         view.print_response()
         return
 
-    # Display the results of committing the new file
+    # Display the results of (failing to) committing the new file
     errpg = "20 text/gemini\r\n"
 
     errpg += f"# {normalize_path_info(no_admin = True)}: git ERROR occurred!\n"
@@ -143,13 +144,20 @@ def handle_titan():
 
     print(errpg)
 
-def do_git(cmd, *args):
+def do_git(cmd, /, *args, trace = True):
     argstr = ""
     for arg in args:
         argstr += f" {shquot(arg)}"
-    cmdstr = "HOME=/dev/null; export LC_ALL=C GIT_DIR={} GIT_WORK_TREE={}; exec 2>&1 </dev/null; set -x; git {} {}".format(
+
+    if trace:
+        tracetxt = "set -x; "
+    else:
+        tracetxt = ""
+
+    cmdstr = "HOME=/dev/null; export LC_ALL=C GIT_DIR={} GIT_WORK_TREE={}; exec 2>&1 </dev/null; {} git {} {}".format(
         shquot(LOCALREPO),
         shquot(DOCROOT),
+        tracetxt,
         shquot(cmd),
         argstr
     )
@@ -403,7 +411,7 @@ class JustEditedPageView(WriteablePageView):
             path = normalize_path_info(no_admin = True)
             while path.startswith("/"): path = path[1:]
             if path.endswith("/"): path = path[:-1]
-            st, out = do_git("log", '-n', '1', '--pretty=%as  %h  %s%n', '--', path)
+            st, out = do_git("log", '-n', '1', '--pretty=%as  %h  %s%n', '--', path, trace = False)
             if st == 0:
                 yield "```\n"
                 yield out
