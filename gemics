@@ -119,8 +119,7 @@ def handle_titan():
         commitst, commitout = do_git('commit', *revmsg)
 
     if addst == 0 and commitst == 0:
-        view = JustEditedPageView(doc)
-        view.print_response()
+        print("30 " + gemini_redirect() + "?showrev\r")
         return
 
     # Display the results of (failing to) committing the new file
@@ -271,6 +270,8 @@ def get_page_view():
         return EditPageView(doc)
     elif os.environ['PATH_INFO'].startswith("/:admin/"):
         return AdminPageView(doc)
+    elif os.environ['QUERY_STRING'] == 'showrev':
+        return JustEditedPageView(doc)
     else:
         return WriteablePageView(doc)
 
